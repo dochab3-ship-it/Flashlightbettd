@@ -1,0 +1,113 @@
+index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audio Triggered Flashlight</title>
+<style>
+body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 20px; }
+button { padding: 15px 30px; font-size: 18px; margin: 20px; border-radius: 8px; border: none; cursor: pointer; }
+#startBtn { background: #00e676; color: black; }
+#status { font-weight: bold; margin-top: 20px; color: #bbb; }
+.active { color: #00e676 !important; }
+</style>
+</head>
+<body>
+
+<h1>Audio Flashlight Trigger</h1>
+<p>Listens for a high-pitched target tone (~15,000 Hz) to toggle the phone flashlight.</p>
+
+<button id="startBtn">Activate System</button>
+<div id="status">Status: Waiting for user permission...</div>
+
+<script>
+let audioContext, analyser, microphone, javascriptNode;
+let track = null;
+let flashlightOn = false;
+let lastTriggerTime = 0;
+
+// Target frequency config
+const TARGET_FREQ = 15000; // 15 kHz
+const FREQ_TOLERANCE = 300; // ±300 Hz range
+const THRESHOLD_DB = -50; // Sensitivity (closer to 0 is less sensitive)
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+document.getElementById('status').innerText = "Initializing components...";
+try {
+// 1. Request Camera/Flashlight permissions
+const stream = await navigator.mediaDevices.getUserMedia({
+video: { facingMode: { exact: "environment" } }
+});
+track = stream.getVideoTracks()[0];
+
+// 2. Request Microphone permissions
+const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+// 3. Set up Web Audio API processing loop
+audioContext = new (window.AudioContext || window.webkitAudioContext)();
+analyser = audioContext.createAnalyser();
+analyser.fftSize = 2048; // Resolution of frequency bins
+
+microphone = audioContext.createMediaStreamSource(audioStream);
+microphone.connect(analyser);
+
+// Check frequency data every 50ms
+setInterval(analyzeAudio, 50);
+
+document.getElementById('startBtn').style.display = 'none';
+document.getElementById('status').innerHTML = "<span class='active'>System Listening live...</span>";
+
+} catch (err) {
+console.error(err);
+document.getElementById('status').innerText = "Error: Make sure to grant camera and mic access, and use a mobile phone via HTTPS.";
+}
+});
+
+function analyzeAudio() {
+if (!analyser) return;
+
+const bufferLength = analyser.frequencyBinCount;
+const dataArray = new Float32Array(bufferLength);
+analyser.getFloatFrequencyData(dataArray);
+
+// Calculate which visual "bin" corresponds to 15kHz
+const sampleRate = audioContext.sampleRate;
+const binSize = sampleRate / analyser.fftSize;
+
+const lowBin = Math.floor((TARGET_FREQ - FREQ_TOLERANCE) / binSize);
+const highBin = Math.ceil((TARGET_FREQ + FREQ_TOLERANCE) / binSize);
+
+// Look for peak volume inside our target zone
+let maxVolume = -Infinity;
+for (let i = lowBin; i <= highBin; i++) {
+if (dataArray[i] > maxVolume) {
+maxVolume = dataArray[i];
+}
+}
+
+// Debounce timing mechanism (prevent instant double-triggers)
+const now = Date.now();
+if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1000)) {
+lastTriggerTime = now;
+toggleFlashlight();
+}
+}
+
+async function toggleFlashlight() {
+if (!track) return;
+
+flashlightOn = !flashlightOn;
+try {
+// Apply the hardware flashlight update constraint
+await track.applyConstraints({
+advanced: [{ torch: flashlightOn }]
+});
+document.getElementById('status').innerText = `Trigger received! Flashlight: ${flashlightOn ? 'ON' : 'OFF'}`;
+} catch (e) {
+console.error("Torch constraint not supported on this specific browser/device combo.", e);
+}
+}
+</script>
+</body>
+</html>
