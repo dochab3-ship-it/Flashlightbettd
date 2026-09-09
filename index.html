@@ -7,12 +7,12 @@
     <style>
         body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 10px; transition: background 0.08s ease; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; }
         .container { width: 100%; max-width: 320px; padding: 15px; background: rgba(0,0,0,0.75); border-radius: 12px; backdrop-filter: blur(10px); box-sizing: border-box; }
-        h1 { font-size: 18px; margin: 0 0 5px 0; letter-spacing: 0.5px; }
+        h1 { font-size: 18px; margin: 0 0 5px 0; letter-spacing: 0.5px; user-select: none; -webkit-user-select: none; cursor: pointer; }
         p { font-size: 11px; color: #aaa; margin: 0 0 12px 0; line-height: 1.3; }
         button { padding: 16px 20px; font-size: 16px; margin: 5px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #00e676; color: black; box-shadow: 0 4px 10px rgba(0,230,118,0.2); }
         #status { font-size: 14px; margin: 8px 0; color: #00e676; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
         
-        /* Admin-only configuration styling */
+        /* Admin-only configuration styling - Hidden by default */
         .admin-panel { display: none; background: #1a1a1a; border: 1px dashed #555; padding: 12px; border-radius: 8px; margin-top: 15px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
         .admin-title { font-weight: bold; color: #ff5252; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 8px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
         label { display: block; margin-bottom: 4px; color: #bbb; font-weight: 500; }
@@ -24,6 +24,7 @@
 <body>
 
     <div class="container">
+        <!-- Tapping this title 3 times will unlock the panel -->
         <h1 id="mainTitle">Classroom Sync</h1>
         <p id="mainDesc">Connecting to room sound array...</p>
         
@@ -66,7 +67,7 @@
         let energyHistory = [];
         const HISTORY_MAX = 30;
 
-        // Reactive Application Defaults (Controlled live by Admin panel elements)
+        // Reactive Application Defaults
         let activeColor = "#00ffcc";
         let beatSensitivity = 15;
         let flashDuration = 80;
@@ -75,18 +76,20 @@
         const ULTRA_TOLERANCE = 300;
         const ULTRA_THRESHOLD = -66;
 
-        // Security check for Admin access privileges via URL Parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        const isAdmin = urlParams.get('mode') === 'admin';
+        // FIXED: Secret Tap Counter for Admin unlocking
+        let titleClickCount = 0;
+        document.getElementById('mainTitle').addEventListener('click', () => {
+            titleClickCount++;
+            if (titleClickCount >= 3) {
+                document.getElementById('adminPanel').style.display = 'block';
+                document.getElementById('debugLog').style.display = 'block';
+                document.getElementById('mainTitle').innerText = "Matrix Master Console";
+                document.getElementById('mainDesc').innerText = "Configure deployment settings live.";
+                titleClickCount = 0;
+            }
+        });
 
-        if (isAdmin) {
-            document.getElementById('adminPanel').style.display = 'block';
-            document.getElementById('debugLog').style.display = 'block';
-            document.getElementById('mainTitle').innerText = "Matrix Master Console";
-            document.getElementById('mainDesc').innerText = "Configure deployment settings live. Sound analyzer data stream visible.";
-        }
-
-        // Live Admin Panel listeners linking variables to UI elements
+        // Live Admin Panel listeners
         document.getElementById('sensSlider').addEventListener('input', (e) => {
             beatSensitivity = parseInt(e.target.value);
             document.getElementById('sensVal').innerText = beatSensitivity;
@@ -104,18 +107,15 @@
         });
         document.getElementById('ultraFreqInput').addEventListener('change', (e) => {
             targetUltraFreq = parseInt(e.target.value);
-            log("Ultrasonic target retuned to " + targetUltraFreq + "Hz");
         });
 
         function log(msg) {
-            if(!isAdmin) return;
             const logBox = document.getElementById('debugLog');
             logBox.innerHTML += "<br>> " + msg;
             logBox.scrollTop = logBox.scrollHeight;
         }
 
         document.getElementById('startBtn').addEventListener('click', async () => {
-            log("Opening audio processing listeners...");
             try {
                 const audioStream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
@@ -127,7 +127,7 @@
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 
                 setInterval(processAudioStreams, 20);
-            } catch (err) { log("Mic access blocked: " + err.message); }
+            } catch (err) { log("Mic block: " + err.message); }
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
@@ -135,7 +135,6 @@
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "Synced to Room";
             } catch (err) { 
-                log("Camera track offline. Fallback to canvas screen flash."); 
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "Screen Sync Active";
             }
@@ -190,3 +189,6 @@
             if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
         }
 
+        function executeLightSequence() {
+            document.body.style.background = activeColor;
+            setTorchState(true);
