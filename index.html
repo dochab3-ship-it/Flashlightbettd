@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultrasonic Flashlight</title>
+    <title>Music Pulse Flashlight</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 15px; }
         button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; max-width: 300px; }
@@ -11,32 +11,38 @@
         #status { font-size: 22px; margin: 15px 0; color: #00e676; font-weight: bold; }
         .control-panel { background: #1e1e1e; padding: 15px; border-radius: 10px; margin: 15px auto; max-width: 350px; text-align: left; }
         label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
-        #debugLog { background: #000; color: #ff5252; padding: 15px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 20px; font-size: 11px; max-height: 180px; overflow-y: auto; }
+        input[type="range"] { width: 100%; margin-bottom: 15px; }
+        #debugLog { background: #000; color: #ff5252; padding: 15px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 20px; font-size: 11px; max-height: 150px; overflow-y: auto; }
+        .visualizer-dot { width: 40px; height: 40px; background: #333; border-radius: 50%; margin: 10px auto; transition: background 0.1s ease; }
     </style>
 </head>
 <body>
 
-    <h1>Ultrasonic Flashlight</h1>
-    <p>1. Tap Activate. 2. Broadcast a silent 17.5 kHz wave from a second device.</p>
+    <h1>Music Pulse Flashlight</h1>
+    <p>1. Tap Activate. 2. Place phone near a speaker playing music with a strong beat.</p>
     
     <button id="startBtn">1. Click to Activate</button>
     <div id="status">Status: Offline</div>
 
+    <div class="visualizer-dot" id="vDot"></div>
+
     <div class="control-panel">
-        <label>Target Frequency: <strong>17,500 Hz (Inaudible)</strong></label>
-        <label>Current Volume Spike at Target: <span id="liveVolume">-100</span> dB</label>
+        <label>Beat Sensitivity Threshold: <span id="sensVal">15</span></label>
+        <input type="range" id="sensSlider" min="5" max="40" step="1" value="15">
+        <p style="font-size:11px; color:#777; margin:0;">Move slider left if it flashes constantly; move right if it misses the beat.</p>
     </div>
     
-    <h3 style="color:#666; margin-bottom: 5px;">System Diagnostics:</h3>
-    <div id="debugLog">System ready. Waiting for tap...</div>
+    <h3 style="color:#666; margin-bottom: 5px;">Rhythm Engine:</h3>
+    <div id="debugLog">Waiting for user interaction...</div>
 
     <script>
-        let audioContext, analyser, track = null, flashlightOn = false, lastTriggerTime = 0;
-        
-        // Ultrasonic Targets
-        const TARGET_FREQ = 17500;
-        const FREQ_TOLERANCE = 300; 
-        const THRESHOLD_DB = -68; // Boosted sensitivity to catch faint ultrasonic waves
+        let audioContext, analyser, track = null;
+        let lastBeatTime = 0;
+        let beatSensitivity = 15; // dB spike above moving average needed to flash
+
+        // Moving history parameters to handle changing song volumes dynamically
+        let energyHistory = [];
+        const HISTORY_MAX = 30; 
 
         function log(msg) {
             const logBox = document.getElementById('debugLog');
@@ -44,84 +50,88 @@
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        document.getElementById('startBtn').addEventListener('click', async () => {
-            log("Configuring ultrasonic listeners...");
-            document.getElementById('status').innerText = "Requesting permissions...";
+        document.getElementById('sensSlider').addEventListener('input', (e) => {
+            beatSensitivity = parseInt(e.target.value);
+            document.getElementById('sensVal').innerText = beatSensitivity;
+        });
 
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            log("Initializing beat mapping algorithms...");
             try {
-                // Request mic with raw processing to disable iOS echo filters
                 const audioStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                    } 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
                 });
-                log("Unfiltered Microphone stream established.");
+                log("Music mic link opened.");
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048; // High resolution frequency separation
+                analyser.fftSize = 512; // Smaller size = faster response time for fast beats
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 
-                setInterval(analyzeAudio, 50);
-            } catch (err) {
-                log("MIC REJECTION: " + err.message);
-            }
+                // Track rapidly at 20ms intervals (50 times a second) for precision timing
+                setInterval(detectBeat, 20);
+            } catch (err) { log("MIC REJECTION: " + err.message); }
 
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment" } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 track = stream.getVideoTracks();
-                log("Rear Camera stream active.");
-                
+                log("Hardware strobe linked.");
                 document.getElementById('startBtn').style.display = 'none';
-                document.getElementById('status').innerText = "🤫 SILENTLY LISTENING...";
-            } catch (err) {
-                log("CAMERA REJECTION: " + err.message);
-                document.getElementById('status').innerText = "System Blocked.";
-            }
+                document.getElementById('status').innerText = "🕺 READY FOR MUSIC!";
+            } catch (err) { log("CAMERA REJECTION: " + err.message); }
         });
 
-        function analyzeAudio() {
+        function detectBeat() {
             if (!analyser) return;
-            const dataArray = new Float32Array(analyser.frequencyBinCount);
-            analyser.getFloatFrequencyData(dataArray);
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
             
-            const sampleRate = audioContext.sampleRate;
-            const binSize = sampleRate / analyser.fftSize;
+            // Step 1: Calculate the immediate energy of Sub-Bass and Bass bins (roughly 40Hz - 150Hz)
+            let instantBassEnergy = 0;
+            const bassBinsLimit = 8; // Top boundary of bass range in a 512 FFT size
             
-            const lowBin = Math.floor((TARGET_FREQ - FREQ_TOLERANCE) / binSize);
-            const highBin = Math.ceil((TARGET_FREQ + FREQ_TOLERANCE) / binSize);
-
-            let maxVolume = -Infinity;
-            for (let i = lowBin; i <= highBin; i++) {
-                if (dataArray[i] > maxVolume) maxVolume = dataArray[i];
+            for (let i = 0; i < bassBinsLimit; i++) {
+                instantBassEnergy += dataArray[i];
             }
+            instantBassEnergy = instantBassEnergy / bassBinsLimit;
 
-            // Update live volume display on screen
-            if (maxVolume !== -Infinity) {
-                document.getElementById('liveVolume').innerText = Math.round(maxVolume);
+            // Step 2: Compare against historical average volume of the room
+            let historySum = 0;
+            for (let i = 0; i < energyHistory.length; i++) {
+                historySum += energyHistory[i];
             }
+            let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
 
+            // Step 3: Beat Trigger Equation
             const now = Date.now();
-            if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1500)) {
-                lastTriggerTime = now;
-                log(`Ultrasonic wave detected at 17.5kHz (${Math.round(maxVolume)}dB)!`);
-                toggleFlashlight();
+            const dot = document.getElementById('vDot');
+
+            // If immediate bass volume jumps significantly over average room volume, it's a beat
+            if (instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > 180)) {
+                lastBeatTime = now;
+                dot.style.background = "#00e676"; // Light up screen visualizer dot
+                setFlashlight(true);
+                
+                // Keep the flash quick and punchy (turn off after 70 milliseconds)
+                setTimeout(() => {
+                    setFlashlight(false);
+                    dot.style.background = "#333";
+                }, 70);
+            }
+
+            // Keep the rolling history buffer full
+            energyHistory.push(instantBassEnergy);
+            if (energyHistory.length > HISTORY_MAX) {
+                energyHistory.shift();
             }
         }
 
-        async function toggleFlashlight() {
+        async function setFlashlight(turnOn) {
             if (!track || track.length === 0) return;
-            flashlightOn = !flashlightOn;
             try {
-                await track[0].applyConstraints({ advanced: [{ torch: flashlightOn }] });
-                document.getElementById('status').innerText = `Torch: ${flashlightOn ? 'ON' : 'OFF'}`;
-                log("Hardware Torch state flipped successfully.");
+                await track[0].applyConstraints({ advanced: [{ torch: turnOn }] });
             } catch (e) {
-                log("TORCH DISALLOWED: Make sure your battery is charged above 20%!");
+                // Fail silently to prevent console log spamming 50x a second
             }
         }
     </script>
