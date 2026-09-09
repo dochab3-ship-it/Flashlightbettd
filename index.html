@@ -3,58 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Classroom Music Sync</title>
+    <title>Classroom Matrix</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 15px; transition: background 0.1s ease; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .container { max-width: 400px; padding: 20px; background: rgba(0,0,0,0.6); border-radius: 16px; backdrop-filter: blur(10px); }
-        button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #00e676; color: black; }
-        #status { font-size: 24px; margin: 15px 0; color: #00e676; font-weight: bold; text-shadow: 0 0 10px rgba(0,230,118,0.5); }
-        .control-panel { background: #1e1e1e; padding: 15px; border-radius: 10px; margin: 15px auto; text-align: left; }
-        label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
-        input[type="range"] { width: 100%; margin-bottom: 10px; }
-        #debugLog { background: #000; color: #ff5252; padding: 10px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 20px; font-size: 11px; max-height: 100px; overflow-y: auto; width: 100%; box-sizing: border-box; }
+        body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 10px; transition: background 0.08s ease; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; }
+        .container { width: 100%; max-width: 320px; padding: 15px; background: rgba(0,0,0,0.75); border-radius: 12px; backdrop-filter: blur(10px); box-sizing: border-box; }
+        h1 { font-size: 18px; margin: 0 0 5px 0; letter-spacing: 0.5px; }
+        p { font-size: 11px; color: #aaa; margin: 0 0 12px 0; line-height: 1.3; }
+        button { padding: 16px 20px; font-size: 16px; margin: 5px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #00e676; color: black; box-shadow: 0 4px 10px rgba(0,230,118,0.2); }
+        #status { font-size: 14px; margin: 8px 0; color: #00e676; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* Admin-only configuration styling */
+        .admin-panel { display: none; background: #1a1a1a; border: 1px dashed #555; padding: 12px; border-radius: 8px; margin-top: 15px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
+        .admin-title { font-weight: bold; color: #ff5252; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 8px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+        label { display: block; margin-bottom: 4px; color: #bbb; font-weight: 500; }
+        input[type="range"], select, input[type="number"] { width: 100%; margin-bottom: 10px; background: #2a2a2a; color: #fff; border: 1px solid #444; padding: 6px; border-radius: 4px; box-sizing: border-box; font-size: 12px; }
+        
+        #debugLog { background: #000; color: #00ffcc; padding: 6px; text-align: left; font-family: monospace; border-radius: 6px; margin-top: 10px; font-size: 9px; max-height: 50px; overflow-y: auto; width: 100%; box-sizing: border-box; display: none; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>Classroom Music Sync</h1>
-        <p>Tap activate and place near the music speaker to join the synchronized light show.</p>
+        <h1 id="mainTitle">Classroom Sync</h1>
+        <p id="mainDesc">Connecting to room sound array...</p>
         
-        <button id="startBtn">Join Light Show</button>
-        <div id="status">Status: Offline</div>
+        <button id="startBtn">Join Show</button>
+        <div id="status">Offline</div>
 
-        <div class="control-panel">
-            <label>Beat Sensitivity: <span id="sensVal">15</span></label>
+        <!-- Hidden Admin Configuration Panel -->
+        <div class="admin-panel" id="adminPanel">
+            <div class="admin-title">🛠️ Master Controller Config</div>
+            
+            <label>Strobe Flash Color:</label>
+            <select id="colorSelect">
+                <option value="#00ffcc" selected>Neon Cyan</option>
+                <option value="#ff0055">Neon Pink</option>
+                <option value="#9900ff">Neon Purple</option>
+                <option value="#ff9900">Neon Orange</option>
+                <option value="#00ff00">Neon Green</option>
+                <option value="#ffffff">Pure White</option>
+            </select>
+
+            <label>Ultrasonic Command Pitch (Hz):</label>
+            <input type="number" id="ultraFreqInput" value="17500" min="15000" max="22000" step="100">
+
+            <label>Music Beat Sensitivity (dB threshold): <span id="sensVal">15</span></label>
             <input type="range" id="sensSlider" min="5" max="40" step="1" value="15">
+
+            <label>Flash Duration (Milliseconds): <span id="durVal">80</span>ms</label>
+            <input type="range" id="durSlider" min="30" max="500" step="10" value="80">
+
+            <label>Double-Beat Lockout Window: <span id="lockVal">330</span>ms</label>
+            <input type="range" id="lockSlider" min="150" max="600" step="10" value="330">
         </div>
         
-        <div id="debugLog">Rhythm system ready...</div>
+        <div id="debugLog">Matrix ready...</div>
     </div>
 
     <script>
         let audioContext, analyser, track = null;
         let lastBeatTime = 0;
-        let beatSensitivity = 15; 
         let energyHistory = [];
         const HISTORY_MAX = 30;
 
-        // Bright neon color palette for the background transitions
-        const colors = ["#ff0055", "#00ffcc", "#9900ff", "#ff9900", "#00ff00", "#ff00ff", "#ffff00"];
+        // Reactive Application Defaults (Controlled live by Admin panel elements)
+        let activeColor = "#00ffcc";
+        let beatSensitivity = 15;
+        let flashDuration = 80;
+        let doubleBeatLockout = 330;
+        let targetUltraFreq = 17500;
+        const ULTRA_TOLERANCE = 300;
+        const ULTRA_THRESHOLD = -66;
+
+        // Security check for Admin access privileges via URL Parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const isAdmin = urlParams.get('mode') === 'admin';
+
+        if (isAdmin) {
+            document.getElementById('adminPanel').style.display = 'block';
+            document.getElementById('debugLog').style.display = 'block';
+            document.getElementById('mainTitle').innerText = "Matrix Master Console";
+            document.getElementById('mainDesc').innerText = "Configure deployment settings live. Sound analyzer data stream visible.";
+        }
+
+        // Live Admin Panel listeners linking variables to UI elements
+        document.getElementById('sensSlider').addEventListener('input', (e) => {
+            beatSensitivity = parseInt(e.target.value);
+            document.getElementById('sensVal').innerText = beatSensitivity;
+        });
+        document.getElementById('durSlider').addEventListener('input', (e) => {
+            flashDuration = parseInt(e.target.value);
+            document.getElementById('durVal').innerText = flashDuration;
+        });
+        document.getElementById('lockSlider').addEventListener('input', (e) => {
+            doubleBeatLockout = parseInt(e.target.value);
+            document.getElementById('lockVal').innerText = doubleBeatLockout;
+        });
+        document.getElementById('colorSelect').addEventListener('change', (e) => {
+            activeColor = e.target.value;
+        });
+        document.getElementById('ultraFreqInput').addEventListener('change', (e) => {
+            targetUltraFreq = parseInt(e.target.value);
+            log("Ultrasonic target retuned to " + targetUltraFreq + "Hz");
+        });
 
         function log(msg) {
+            if(!isAdmin) return;
             const logBox = document.getElementById('debugLog');
             logBox.innerHTML += "<br>> " + msg;
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        document.getElementById('sensSlider').addEventListener('input', (e) => {
-            beatSensitivity = parseInt(e.target.value);
-            document.getElementById('sensVal').innerText = beatSensitivity;
-        });
-
         document.getElementById('startBtn').addEventListener('click', async () => {
-            log("Syncing listening arrays...");
+            log("Opening audio processing listeners...");
             try {
                 const audioStream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
@@ -65,70 +126,67 @@
                 analyser.fftSize = 512; 
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 
-                setInterval(detectBeat, 20);
-            } catch (err) { log("Mic sync block: " + err.message); }
+                setInterval(processAudioStreams, 20);
+            } catch (err) { log("Mic access blocked: " + err.message); }
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                track = stream.getVideoTracks();
+                track = stream.getVideoTracks()[0];
                 document.getElementById('startBtn').style.display = 'none';
-                document.getElementById('status').innerText = "🕺 SYNCED TO ROOM!";
-                log("Hardware matrix operational.");
+                document.getElementById('status').innerText = "Synced to Room";
             } catch (err) { 
-                log("Camera restricted. Screen show active."); 
+                log("Camera track offline. Fallback to canvas screen flash."); 
                 document.getElementById('startBtn').style.display = 'none';
-                document.getElementById('status').innerText = "📺 SCREEN SYNC ACTIVE!";
+                document.getElementById('status').innerText = "Screen Sync Active";
             }
         });
 
-        function detectBeat() {
+        function processAudioStreams() {
             if (!analyser) return;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
             
+            const sampleRate = audioContext.sampleRate;
+            const binSize = sampleRate / analyser.fftSize;
+            const now = Date.now();
+
+            // 1. Bass Energy Parsing
             let instantBassEnergy = 0;
-            const bassBinsLimit = 8; // Monitors 40Hz - 150Hz
-            
-            for (let i = 0; i < bassBinsLimit; i++) {
-                instantBassEnergy += dataArray[i];
-            }
+            const bassBinsLimit = 4; 
+            for (let i = 0; i < bassBinsLimit; i++) { instantBassEnergy += dataArray[i]; }
             instantBassEnergy = instantBassEnergy / bassBinsLimit;
 
             let historySum = 0;
-            for (let i = 0; i < energyHistory.length; i++) {
-                historySum += energyHistory[i];
-            }
+            for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
             let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
 
-            const now = Date.now();
+            // 2. High Frequency Ultrasonic Message Parsing
+            const floatData = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(floatData);
+            const ultraLowBin = Math.floor((targetUltraFreq - ULTRA_TOLERANCE) / binSize);
+            const ultraHighBin = Math.ceil((targetUltraFreq + ULTRA_TOLERANCE) / binSize);
+            let maxUltraVolume = -Infinity;
+            for (let i = ultraLowBin; i <= ultraHighBin; i++) {
+                if (floatData[i] > maxUltraVolume) maxUltraVolume = floatData[i];
+            }
 
-            // FIXED: Added 330ms lockout window to step cleanly over rapid double-beats
-            if (instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > 330)) {
+            // 3. Command Evaluation Loop
+            let frameTrigger = false;
+
+            if (instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) {
+                frameTrigger = true;
+            }
+            if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) {
+                frameTrigger = true;
+                log("Target wave pattern identified!");
+            }
+
+            if (frameTrigger) {
                 lastBeatTime = now;
-                
-                // Color show transition
-                const randomColor = colors[Math.floor(Math.random() * colors.length)];
-                document.body.style.background = randomColor;
-                setFlashlight(true);
-                
-                setTimeout(() => {
-                    setFlashlight(false);
-                    document.body.style.background = "#121212";
-                }, 80);
+                executeLightSequence();
             }
 
             energyHistory.push(instantBassEnergy);
-            if (energyHistory.length > HISTORY_MAX) {
-                energyHistory.shift();
-            }
+            if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
         }
 
-        async function setFlashlight(turnOn) {
-            if (!track || track.length === 0) return;
-            try {
-                await track[0].applyConstraints({ advanced: [{ torch: turnOn }] });
-            } catch (e) {}
-        }
-    </script>
-</body>
-</html>
