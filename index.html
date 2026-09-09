@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Flashlight</title>
+    <title>Ultrasonic Flashlight</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 15px; }
         button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; max-width: 300px; }
@@ -11,24 +11,20 @@
         #status { font-size: 22px; margin: 15px 0; color: #00e676; font-weight: bold; }
         .control-panel { background: #1e1e1e; padding: 15px; border-radius: 10px; margin: 15px auto; max-width: 350px; text-align: left; }
         label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
-        input[type="range"] { width: 100%; margin-bottom: 15px; }
         #debugLog { background: #000; color: #ff5252; padding: 15px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 20px; font-size: 11px; max-height: 180px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
-    <h1>Audio Flashlight</h1>
-    <p>Press start, then blow a sharp whistle or play a 2,000 Hz tone.</p>
+    <h1>Ultrasonic Flashlight</h1>
+    <p>1. Tap Activate. 2. Broadcast a silent 17.5 kHz wave from a second device.</p>
     
     <button id="startBtn">1. Click to Activate</button>
     <div id="status">Status: Offline</div>
 
     <div class="control-panel">
-        <label>Target Pitch: <span id="freqVal">2000</span> Hz</label>
-        <input type="range" id="freqSlider" min="500" max="5000" step="100" value="2000">
-
-        <label>Mic Sensitivity (Lower is more sensitive): <span id="threshVal">-55</span> dB</label>
-        <input type="range" id="threshSlider" min="-80" max="-20" step="1" value="-55">
+        <label>Target Frequency: <strong>17,500 Hz (Inaudible)</strong></label>
+        <label>Current Volume Spike at Target: <span id="liveVolume">-100</span> dB</label>
     </div>
     
     <h3 style="color:#666; margin-bottom: 5px;">System Diagnostics:</h3>
@@ -37,9 +33,10 @@
     <script>
         let audioContext, analyser, track = null, flashlightOn = false, lastTriggerTime = 0;
         
-        let TARGET_FREQ = 17500;
-        let THRESHOLD_DB = -55;
-        const FREQ_TOLERANCE = 250; // broad detection range
+        // Ultrasonic Targets
+        const TARGET_FREQ = 17500;
+        const FREQ_TOLERANCE = 300; 
+        const THRESHOLD_DB = -68; // Boosted sensitivity to catch faint ultrasonic waves
 
         function log(msg) {
             const logBox = document.getElementById('debugLog');
@@ -47,28 +44,24 @@
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        // Handle Slider adjustments live
-        document.getElementById('freqSlider').addEventListener('input', (e) => {
-            TARGET_FREQ = parseInt(e.target.value);
-            document.getElementById('freqVal').innerText = TARGET_FREQ;
-        });
-        document.getElementById('threshSlider').addEventListener('input', (e) => {
-            THRESHOLD_DB = parseInt(e.target.value);
-            document.getElementById('threshVal').innerText = THRESHOLD_DB;
-        });
-
         document.getElementById('startBtn').addEventListener('click', async () => {
-            log("Configuring safe device connection...");
+            log("Configuring ultrasonic listeners...");
             document.getElementById('status').innerText = "Requesting permissions...";
 
-            // 1. Establish Mic Connection
             try {
-                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                log("Microphone connected successfully.");
+                // Request mic with raw processing to disable iOS echo filters
+                const audioStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    } 
+                });
+                log("Unfiltered Microphone stream established.");
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048;
+                analyser.fftSize = 2048; // High resolution frequency separation
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 
                 setInterval(analyzeAudio, 50);
@@ -76,16 +69,15 @@
                 log("MIC REJECTION: " + err.message);
             }
 
-            // 2. Establish Flashlight Connection
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment" } 
                 });
-                track = stream.getVideoTracks()[0];
-                log("Rear Camera module locked.");
+                track = stream.getVideoTracks();
+                log("Rear Camera stream active.");
                 
                 document.getElementById('startBtn').style.display = 'none';
-                document.getElementById('status').innerText = "🎉 LISTENING LIVE!";
+                document.getElementById('status').innerText = "🤫 SILENTLY LISTENING...";
             } catch (err) {
                 log("CAMERA REJECTION: " + err.message);
                 document.getElementById('status').innerText = "System Blocked.";
@@ -104,32 +96,32 @@
             const highBin = Math.ceil((TARGET_FREQ + FREQ_TOLERANCE) / binSize);
 
             let maxVolume = -Infinity;
-            // Scan target frequency window
             for (let i = lowBin; i <= highBin; i++) {
                 if (dataArray[i] > maxVolume) maxVolume = dataArray[i];
             }
 
+            // Update live volume display on screen
+            if (maxVolume !== -Infinity) {
+                document.getElementById('liveVolume').innerText = Math.round(maxVolume);
+            }
+
             const now = Date.now();
-            if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1000)) {
+            if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1500)) {
                 lastTriggerTime = now;
-                log(`Spike found at ${TARGET_FREQ}Hz (${Math.round(maxVolume)}dB)! Toggling torch...`);
+                log(`Ultrasonic wave detected at 17.5kHz (${Math.round(maxVolume)}dB)!`);
                 toggleFlashlight();
             }
         }
 
         async function toggleFlashlight() {
-            if (!track) {
-                log("Toggle aborted: Missing video track connection.");
-                return;
-            }
+            if (!track || track.length === 0) return;
             flashlightOn = !flashlightOn;
             try {
-                // Flashlight toggle rule
-                await track.applyConstraints({ advanced: [{ torch: flashlightOn }] });
+                await track[0].applyConstraints({ advanced: [{ torch: flashlightOn }] });
                 document.getElementById('status').innerText = `Torch: ${flashlightOn ? 'ON' : 'OFF'}`;
                 log("Hardware Torch state flipped successfully.");
             } catch (e) {
-                log("TORCH DISALLOWED: Device hardware block or standard battery saving constraint active.");
+                log("TORCH DISALLOWED: Make sure your battery is charged above 20%!");
             }
         }
     </script>
