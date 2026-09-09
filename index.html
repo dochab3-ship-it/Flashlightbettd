@@ -5,27 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Audio Flashlight</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 20px; }
-        button { padding: 20px 40px; font-size: 20px; margin: 20px; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; }
+        body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 15px; }
+        button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; max-width: 300px; }
         #startBtn { background: #00e676; color: black; }
-        #status { font-size: 18px; margin-top: 20px; color: #00e676; font-weight: bold; }
-        #debugLog { background: #000; color: #ff5252; padding: 15px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 30px; font-size: 12px; max-height: 150px; overflow-y: auto; }
+        #status { font-size: 22px; margin: 15px 0; color: #00e676; font-weight: bold; }
+        .control-panel { background: #1e1e1e; padding: 15px; border-radius: 10px; margin: 15px auto; max-width: 350px; text-align: left; }
+        label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
+        input[type="range"] { width: 100%; margin-bottom: 15px; }
+        #debugLog { background: #000; color: #ff5252; padding: 15px; text-align: left; font-family: monospace; border-radius: 8px; margin-top: 20px; font-size: 11px; max-height: 180px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
-    <h1>Audio Flashlight Trigger</h1>
-    <p>Step 1: Tap the button. Step 2: Play a high tone to toggle light.</p>
+    <h1>Audio Flashlight</h1>
+    <p>Press start, then blow a sharp whistle or play a 2,000 Hz tone.</p>
     
     <button id="startBtn">1. Click to Activate</button>
     <div id="status">Status: Offline</div>
+
+    <div class="control-panel">
+        <label>Target Pitch: <span id="freqVal">2000</span> Hz</label>
+        <input type="range" id="freqSlider" min="500" max="5000" step="100" value="2000">
+
+        <label>Mic Sensitivity (Lower is more sensitive): <span id="threshVal">-55</span> dB</label>
+        <input type="range" id="threshSlider" min="-80" max="-20" step="1" value="-55">
+    </div>
     
-    <h3 style="margin-top:40px; color:#666;">System Diagnostics:</h3>
-    <div id="debugLog">System initialized. Waiting for tap...</div>
+    <h3 style="color:#666; margin-bottom: 5px;">System Diagnostics:</h3>
+    <div id="debugLog">System ready. Waiting for tap...</div>
 
     <script>
         let audioContext, analyser, track = null, flashlightOn = false, lastTriggerTime = 0;
-        const TARGET_FREQ = 1000, FREQ_TOLERANCE = 500, THRESHOLD_DB = -55;
+        
+        let TARGET_FREQ = 2000;
+        let THRESHOLD_DB = -55;
+        const FREQ_TOLERANCE = 250; // broad detection range
 
         function log(msg) {
             const logBox = document.getElementById('debugLog');
@@ -33,39 +47,48 @@
             logBox.scrollTop = logBox.scrollHeight;
         }
 
+        // Handle Slider adjustments live
+        document.getElementById('freqSlider').addEventListener('input', (e) => {
+            TARGET_FREQ = parseInt(e.target.value);
+            document.getElementById('freqVal').innerText = TARGET_FREQ;
+        });
+        document.getElementById('threshSlider').addEventListener('input', (e) => {
+            THRESHOLD_DB = parseInt(e.target.value);
+            document.getElementById('threshVal').innerText = THRESHOLD_DB;
+        });
+
         document.getElementById('startBtn').addEventListener('click', async () => {
-            log("Button clicked. Starting security check...");
+            log("Configuring safe device connection...");
             document.getElementById('status').innerText = "Requesting permissions...";
 
-            // Fix 1: Request Mic FIRST
+            // 1. Establish Mic Connection
             try {
-                log("Requesting Microphone access...");
                 const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                log("Microphone access GRANTED.");
+                log("Microphone connected successfully.");
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 2048;
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
+                
                 setInterval(analyzeAudio, 50);
             } catch (err) {
-                log("MIC ERROR: " + err.name + " - " + err.message);
+                log("MIC REJECTION: " + err.message);
             }
 
-            // Fix 2: Request Camera SECOND with looser environmental constraints
+            // 2. Establish Flashlight Connection
             try {
-                log("Requesting Rear Camera/Flashlight access...");
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment" } 
                 });
                 track = stream.getVideoTracks()[0];
-                log("Camera access GRANTED.");
+                log("Rear Camera module locked.");
                 
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "🎉 LISTENING LIVE!";
             } catch (err) {
-                log("CAMERA ERROR: " + err.name + " - " + err.message);
-                document.getElementById('status').innerText = "Permission Denied or Blocked.";
+                log("CAMERA REJECTION: " + err.message);
+                document.getElementById('status').innerText = "System Blocked.";
             }
         });
 
@@ -73,36 +96,40 @@
             if (!analyser) return;
             const dataArray = new Float32Array(analyser.frequencyBinCount);
             analyser.getFloatFrequencyData(dataArray);
-            const binSize = audioContext.sampleRate / analyser.fftSize;
+            
+            const sampleRate = audioContext.sampleRate;
+            const binSize = sampleRate / analyser.fftSize;
             
             const lowBin = Math.floor((TARGET_FREQ - FREQ_TOLERANCE) / binSize);
             const highBin = Math.ceil((TARGET_FREQ + FREQ_TOLERANCE) / binSize);
 
             let maxVolume = -Infinity;
+            // Scan target frequency window
             for (let i = lowBin; i <= highBin; i++) {
                 if (dataArray[i] > maxVolume) maxVolume = dataArray[i];
             }
 
             const now = Date.now();
-            if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1200)) {
+            if (maxVolume > THRESHOLD_DB && (now - lastTriggerTime > 1000)) {
                 lastTriggerTime = now;
-                log("Frequency match detected at " + TARGET_FREQ + "Hz! Toggling light...");
+                log(`Spike found at ${TARGET_FREQ}Hz (${Math.round(maxVolume)}dB)! Toggling torch...`);
                 toggleFlashlight();
             }
         }
 
         async function toggleFlashlight() {
             if (!track) {
-                log("Toggle failed: No camera track available.");
+                log("Toggle aborted: Missing video track connection.");
                 return;
             }
             flashlightOn = !flashlightOn;
             try {
+                // Flashlight toggle rule
                 await track.applyConstraints({ advanced: [{ torch: flashlightOn }] });
-                document.getElementById('status').innerText = `Flashlight turned: ${flashlightOn ? 'ON' : 'OFF'}`;
-                log("Hardware torch modified successfully.");
+                document.getElementById('status').innerText = `Torch: ${flashlightOn ? 'ON' : 'OFF'}`;
+                log("Hardware Torch state flipped successfully.");
             } catch (e) {
-                log("TORCH API ERROR: Your specific browser/OS mix blocks web flashlight control.");
+                log("TORCH DISALLOWED: Device hardware block or standard battery saving constraint active.");
             }
         }
     </script>
